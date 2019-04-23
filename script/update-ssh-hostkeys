@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# update-ssh-hostkeys - get the SSH public keys into a known location
+# that clients can download
+
+trap '' INT TERM HUP USR1 USR2
+
+TFILE=`mktemp -p /var/www/html ssh_known_hosts.XXXXXXXXXX` || exit 1
+
+# TODO would be nice to use the mtime from database records as
+# modification time on this file so clients can more easily figure out
+# when to download a new file, or to do nothing if nothing has (appeared
+# to) change in the database, or instead to have push notifications or a
+# pub/sub system for when there are changes...
+# TODOFIXME this will need to be findable in $PATH
+irulan ssh_known_hosts > "$TFILE" || exit 1
+
+chmod -- 0644 "$TFILE"
+
+# don't clobber (possibly good) data with a zero-sized file (the
+# security team of a small internet retailer once clobbered /etc/passwd
+# in such a fashion, hence this check...)
+if [ -s "$TFILE" ]; then
+   mv -f -- "$TFILE" /var/www/html/ssh_known_hosts || exit 1
+
+   # record for logging purposes (clients should also do this, in the
+   # event there are questions about what ssh_known_hosts a client had)
+   logger -t update-ssh-hostkeys -- $(sha512sum /etc/ssh/ssh_known_hosts | cut -f1 -d' ')
+
+   # this server can use these ssh host keys directly (handy if you do
+   # Ansible deploys from that host...)
+   cp /var/www/html/ssh_known_hosts /etc/ssh/ssh_known_hosts
+else
+   echo >&2 'warning: zero-sized ssh_known_hosts temporary file??'
+   exit 1
+fi

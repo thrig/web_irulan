@@ -1,0 +1,13 @@
+requires 'Carp';
+requires 'DBD::SQLite';
+requires 'DBI';
+requires 'Data::SSHPubkey';
+requires 'Data::UUID';
+requires 'FindBin';
+requires 'Getopt::Long';
+requires 'Mojolicious';
+requires 'Net::DNS';
+requires 'NetAddr::IP';
+requires 'SQL::Abstract';
+requires 'Scalar::Util';
+requires 'Sys::Syslog';

@@ -1,0 +1,42 @@
+Web::Irulan
+
+is the parts for a Mojolicious webapp and some command line toolage that
+assists with the collection and distribution of SSH host keys from and
+to client systems. it makes various OpenSSH assumptions, relies on
+SQLite, and will need some amount of tweakage (hence "parts for") to fit
+into a particular environment
+
+ * a sqlite database will need to be setup (or convert this to use
+   Mojo::Pg or similar); see irulan.schema
+ * Web::Irulan will need to be configured in a webserver (see Mojo docs
+   for how to do that in your environment)
+ * client systems can use curl(1) to upload their SSH public keys using
+   `irulan-upload` (see the scripts dir). this can be improved with
+   stronger verification of the server or to (via KickStart or at build
+   time) get a UUID the server already knows about to the client to
+   better verify that
+ * the `irulan` script is used on the server to manipulate the contents
+   of the Irulan database. this also could be done via a web interface,
+   but I do not like those
+ * search for TODOFIXME things in the code for where changes are
+   required (the work version of this code is deployed with Ansible
+   which handles filling in various details that might be better done
+   via web-irulan.conf)
+
+in particular with `irulan-upload` installed and run on client systems
+(during KickStart, with some more work to schedule it as a cron job if
+the initial upload fails) adding a new system can be as easy as
+
+    $ irulan unhosted
+    ...
+    $ irulan addhost 1234 foo.example.edu
+
+clients periodically try to update their ssh_known_hosts file from what
+Irulan can make available. this in practice is less effort than manually
+obtaining, maintaining, and pushing out ssh_known_hosts, and unlike a
+static ssh_known_hosts file hand maintained under version control can be
+regenerated automatically with updated DNS information, etc
+
+(TODO mostly an untested conversion of internal code from $work plus
+(also untested!) support for not-22 port sshd. needs a bunch cleanups
+and improvements to be a better drop-in-and-use it solution...)

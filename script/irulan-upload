@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# irulan-upload - uploads SSH host keys to the Irulan database. tested
+# only on Centos7 clients, requires uuidgen and curl
+umask 027
+[ ! -d /etc/irulan ] && mkdir /etc/irulan
+[ ! -f /etc/irulan/id ] && uuidgen > /etc/irulan/id
+[ ! -f /etc/irulan/id ] && exit 1
+if [ ! -f /etc/irulan/sysid ]; then
+   if [ -z "`find /etc/ssh -maxdepth 1 -name \*.pub`" ]; then
+      ssh-keygen -A
+      # KLUGE RedHat does not generate RSA1 nor DSA as they do not use
+      # the above command to make the keys
+      rm /etc/ssh/ssh_host_key.pub /etc/ssh/ssh_host_key \
+         /etc/ssh/ssh_host_dsa_key.pub /etc/ssh/ssh_host_dsa_key
+   fi
+   # TODOFIXME probably want better verification of cert of webserver
+   # being talked to (so that it is less likely to be a MITM)
+   cat /etc/ssh/*.pub \
+   | curl -4 -H "X-Irulan-ID: `cat /etc/irulan/id`" \
+      --data-urlencode in@- \
+      --fail --silent \
+      https://TODOFIXME.example.edu/ssh/hostkeys/ \
+      > /etc/irulan/potential
+   curlret=$?
+   if [ "$curlret" -eq 0 ]; then
+      mv /etc/irulan/potential /etc/irulan/sysid
+   else
+      exit "$curlret"
+   fi
+fi
+exit 0

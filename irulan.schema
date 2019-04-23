@@ -1,0 +1,23 @@
+CREATE TABLE systems (
+  sysid INTEGER PRIMARY KEY NOT NULL,
+  uuid TEXT UNIQUE,
+  mtime INTEGER,
+  info TEXT
+);
+CREATE TABLE hosts (
+  hostid INTEGER PRIMARY KEY,
+  hostname TEXT,
+  port INTEGER,
+  mtime INTEGER,
+  sysid INTEGER NOT NULL,
+  FOREIGN KEY(sysid) REFERENCES systems(systemid)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+CREATE TABLE sshkeys (
+  sshkeyid INTEGER PRIMARY KEY,
+  pubkey TEXT,
+  mtime INTEGER,
+  sysid INTEGER NOT NULL,
+  FOREIGN KEY(sysid) REFERENCES systems(systemid)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
