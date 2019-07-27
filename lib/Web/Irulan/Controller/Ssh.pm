@@ -6,86 +6,67 @@ package Web::Irulan::Controller::Ssh;
 use Mojo::Base 'Mojolicious::Controller';
 
 use Data::SSHPubkey;
-use Irulan::DB;
-use Sys::Syslog qw(openlog syslog);
-
-openlog( 'irulan', 'ndelay,pid', 'LOG_USER' );
 
 my $uuid_re =
   qr{[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}};
 
-sub response {
-    my $self   = shift;
-    my %params = @_;
-    syslog( 'warning', $params{syslog} ) if exists $params{syslog};
-    $params{status} = 200 unless exists $params{status};
-    return $self->render(
-        format => 'txt',
-        text   => $params{text} . "\n",
-        status => $params{status},
-    );
-}
-
-sub hostkeys {
-    my $self   = shift;
+sub upload {
+    my ($self) = @_;
     my $remote = $self->tx->remote_address;
-    # since anyone with access to the server can upload, at least
-    # prevent invalid UUID from getting into the database
+    my $logger = $self->app->log;
+    my $resp   = { error => undef };
+    my $status = 200;
+
     my $uuid = $self->req->headers->header('X-Irulan-ID');
-    if ( !defined $uuid or $uuid !~ m/$uuid_re/ ) {
-        return response(
-            $self,
-            syslog => 'no or invalid UUID from ' . $remote,
-            text   => 'not ok - unauthenticated',
-            status => 401
-        );
+
+    if (!defined $uuid or $uuid !~ m/$uuid_re/) {
+        $logger->warn('no or invalid UUID from ' . $remote);
+        $resp->{error} = 'unidentified';
+        $status = 401;
+        goto RESPONSE;
     }
+
     my $input = $self->param('in');
-    if ( !defined $input ) {
-        return response(
-            $self,
-            syslog => 'invalid request from ' . $remote,
-            text   => 'not ok - invalid request',
-            status => 406
-        );
+
+    if (!defined $input or !length $input) {
+        $logger->warn('invalid request from ' . $remote);
+        $resp->{error} = 'invalid request';
+        $status = 406;
+        goto RESPONSE;
     }
-    # TODO need to strip out PEM PKCS8 RFC4716 types, or use ssh-keygen
-    # to instead convert them
-    my $pubkeys = Data::SSHPubkey::pubkeys( \$input );
-    if (@$pubkeys) {
-        # IP address of client given as info to help relate random UUID
-        # to an IP address (which SLAAC or NAT can confound)
-        my ( $sysid, $msg ) =
-          Irulan::DB::new_system( $uuid, $remote, map { $_->[1] } @$pubkeys );
-        if ( defined $sysid ) {
-            return response(
-                $self,
-                syslog => "new hostkeys remote=$remote sysid=$sysid uuid=$uuid keys="
-                  . scalar @$pubkeys,
-                text => $sysid
-            );
-        } else {
-            # mostly likely cause would be a client reusing a previous
-            # UUID while uploading new keys -- probably want that to be
-            # a manual intervention to reset the client UUID or to clear
-            # database entries for host first
-            # (my systems get blown away on reinstall so reuse is not
-            # much of a problem)
-            return response(
-                $self,
-                syslog => "failed to save keys from remote=$remote uuid=$uuid msg=$msg",
-                text   => 'not ok - internal error',
-                status => 500
-            );
-        }
-    } else {
-        return response(
-            $self,
-            syslog => "failed to parse keys from remote=$remote uuid=$uuid",
-            text   => 'not ok - no keys found',
-            status => 406
-        );
+
+    my $pubkeys = Data::SSHPubkey::pubkeys(\$input);
+    # NOTE this strips out the PEM PKCS8 RFC4716 types (which are
+    # unlikely to be uploaded by an OpenSSH client)
+    @$pubkeys =
+      map { $_->[0] =~ m/^(ecdsa|ed25519|rsa)$/ ? $_->[1] : () } @$pubkeys;
+    if (!@$pubkeys) {
+        $logger->warn("failed to parse keys from remote=$remote uuid=$uuid");
+        $resp->{error} = 'no keys found';
+        $status = 406;
+        goto RESPONSE;
     }
+
+    # IP address of client given as info to help relate random UUID to a
+    # host (which NAT or SLAAC can confound)
+    my $sysid;
+    eval { $sysid = $self->hostkeys->add_system($uuid, $remote, $pubkeys) };
+    if ($@) {
+        # mostly likely cause would be a client reusing a previous UUID
+        # for new keys; clients must instead use a new UUID. or it could
+        # be some other database error...
+        $logger->warn("failed to save keys from remote=$remote uuid=$uuid msg=$@");
+        $resp->{error} = 'internal error';
+        $status = 500;
+        goto RESPONSE;
+    }
+
+    $logger->warn("new hostkeys remote=$remote sysid=$sysid uuid=$uuid count="
+          . scalar @$pubkeys);
+    $resp->{id} = $sysid;
+
+  RESPONSE:
+    $self->render(json => $resp, status => $status);
 }
 
 1;

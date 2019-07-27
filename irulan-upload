@@ -1,0 +1,28 @@
+#!/bin/sh
+# irulan-upload - uploads SSH host keys to the Irulan. tested only on
+# Centos7 clients. requires uuidgen and curl
+umask 027
+[ ! -d /etc/irulan ] && mkdir /etc/irulan
+[ ! -d /etc/irulan ] && exit 1
+[ ! -f /etc/irulan/uuid ] && uuidgen > /etc/irulan/uuid
+[ ! -f /etc/irulan/uuid ] && exit 1
+[ -f /etc/irulan/id.json ] && exit 0
+[ -z "`find /etc/ssh -maxdepth 1 -name \*.pub`" ] && {
+   ssh-keygen -A
+   # KLUGE RedHat does not generate RSA1 nor DSA, nix those
+   rm /etc/ssh/ssh_host_key.pub /etc/ssh/ssh_host_key \
+      /etc/ssh/ssh_host_dsa_key.pub /etc/ssh/ssh_host_dsa_key
+}
+# FIXME probably want better verification of the cert of the
+# webserver being talked to (MitM avoidance)
+cat /etc/ssh/*.pub \
+| curl -H "X-Irulan-Auth: Hunter2" \
+      -H "X-Irulan-ID: `cat /etc/irulan/uuid`" \
+    -4 --fail --silent --data-urlencode in@- \
+  https://FIXME.example.edu/ssh/hostkeys/ > /etc/irulan/error.json
+status=$?
+[ $status -eq 0 ] && {
+   mv /etc/irulan/error.json /etc/irulan/id.json
+   exit $?
+}
+exit $status

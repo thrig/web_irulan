@@ -5,6 +5,6 @@ use warnings;
 
 use FindBin;
 BEGIN { unshift @INC, "$FindBin::Bin/../lib" }
-use Mojolicious::Commands;
 
+require Mojolicious::Commands;
 Mojolicious::Commands->start_app('Web::Irulan');

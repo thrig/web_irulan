@@ -1,219 +1,181 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
-# irulan - helps interact with the SSH host key database
-#
-#  * addhost - links the given sysid to the given fully qualified hostname
-#  * keyscan - wrapper for `ssh-keyscan` to add clients that cannot run
-#    the Irulan client-side script (managed network switches, etc)
-#  * list - shows the sysid and hostnames (use "unhosted" to see
-#    unlinked sysid)
-#  * rmhost - removes a host record by fqhostname
-#  * rmsystem - removes a system (and host and pubkeys) by sysid
-#  * ssh_known_hosts - generates the ssh_known_hosts data (where possible)
-#  * unhosted - what sysid have no linking host table entries
-#
-# TODO need a "just add all unhosted systems who appear to have a
-# valid hostname" for when a batch of systems get added. but that's
-# fairly rare...
+# irulan - interacts with the Web::Irulan SSH host key database
 
-use 5.10.0;
+use 5.16.0;
 use warnings;
-
+use open IN => qw(:bytes);
+use Data::SSHPubkey qw(pubkeys);
 use Data::UUID;
-use Data::SSHPubkey;
-use Getopt::Long qw(GetOptionsFromArray);
+use Getopt::Long qw(GetOptions);
+use Mojo::SQLite;
 use NetAddr::IP qw(:lower);    # 'lower' due to RFC 5952
-use Net::DNS;
 use Scalar::Util qw(looks_like_number);
-use Sys::Syslog qw(openlog syslog);
+use Socket qw(:addrinfo SOCK_RAW);
+use FindBin;
+BEGIN { unshift @INC, "$FindBin::Bin/../lib" }
+use Web::Irulan::Model::Hostkeys;
 
-# TODO probably want to use FindBin for this
-use lib qw(/TODOFIXMEPATHTO/lib);
-use Web::Irulan::DB;
+my $msl = Mojo::SQLite->new->from_filename($ENV{IRULAN_DB_PATH} // 'irulan.db');
+my $db  = Web::Irulan::Model::Hostkeys->new(sqlite => $msl);
 
-openlog( 'irulan', 'ndelay,pid', 'LOG_USER' );
+my ($Flag_NoLookup, $Flag_PostCmd);
 
-my $res = Net::DNS::Resolver->new;
-
-sub ip_to_host {
-    my $reply = $res->search( $_[0], 'PTR' );
-    die "could not lookup PTR for $_[0]: " . $res->errorstring . "\n" unless $reply;
-    my @hosts;
-    for my $rr ( $reply->answer ) {
-        push @hosts, $rr->ptrdname if $rr->can('ptrdname');
-    }
-    warn "multiple PTR records for $_[0] ??\n" if @hosts > 1;
-    return $hosts[0] // '(no PTR record??)';
-}
-
-sub host_addr {
-    my @ips;
-    for my $type (qw(A AAAA)) {
-        my $reply = $res->search( $_[0], $type );
-        if ( !$reply ) {
-            my $err = $res->errorstring;
-            # a bunch of hosts do not have IPv6 addresses, so do not
-            # fail if that is not set (warn or fail elsewhere when
-            # having no IP addresses is a problem)
-            die "could not lookup $type $_[0]: $err\n" unless $err eq 'NXDOMAIN';
-        } else {
-            for my $rr ( $reply->answer ) {
-                push @ips, $rr->address if $rr->can('address');
-            }
-        }
-    }
-    return @ips;
-}
-
-sub alternize {
-    my %alts;
-    for my $host ( @{ $_[0] } ) {
-        $alts{$host} = 1;
-
-        # TODOFIXME include the short hostname -- this is debatable but
-        # might be necessary at some sites
-        #my ($short) = $host =~ m/^([^.]+)/;
-        #$alts{$short} = 1;
-
-        # NOTE canon() necessary here as the OpenSSH client does simple
-        # string matching on the IP address in the known_hosts data
-        my @ips = map { NetAddr::IP->new($_)->canon } host_addr $host;
-        warn "notice: no IP addresses associated with $host ??\n" unless @ips;
-        for my $ip (@ips) {
-            $alts{$ip} = 1;
-        }
-    }
-    return join ',', sort keys %alts;
-}
-
-# modes available to this script
-my %dispatch = (
+# TODO "audit" support where each individual pubkey for each host is
+# tested for validity
+# TODO support "tags" table and from that generate custom known_hosts
+# based on those tags (so that internal hosts can have one list of
+# known_hosts, and external clients another)
+my %commands = (
     addhost => sub {
-        my $mode = shift;
-        my ( $sysid, $hostname, $port ) = @ARGV;
-        if (   !defined $sysid
-            or $sysid !~ m/^\d+$/a
-            or !defined $hostname
-            or !length $hostname
-            or $hostname !~ m/\./ ) {
-            die "Usage: irulan $mode sysid fqhostname [port]\n";
+        my $sysid = $ARGV[0];
+        my ($host, $port) = hostport(@ARGV[ 1, 2 ]);
+        die "Usage: irulan addhost sysid hostname [port]\n"
+          if !defined $sysid
+          or $sysid !~ m/^\d+$/a
+          or !defined $host;
+        if (!$Flag_NoLookup) {
+            die "error: no IP associated with $host\n" unless ip_addrs($host);
         }
-        if ( defined $port ) {
-            die "invalid port number\n" if !looks_like_number $port;
-            $port = int $port;
-        } else {
-            $port = 22;
-        }
-        my @ips = host_addr $hostname;
-        die "error: no IP associated with $hostname\n" unless @ips;
-        # TODO more graceful handling of host that already exist in db
-        my ( $hostid, $msg ) = Web::Irulan::DB::new_host( $sysid, $hostname, $port );
-        if ( defined $hostid ) {
-            syslog 'warning', $msg;
-            say "ok - $msg";
-            # more immediate ssh_known_hosts file update in case someone
-            # forgets to run this
-            # TODOFIXME this will need to be findable in $PATH
-            exec "update-ssh-hostkeys";
-        } else {
-            die $msg;
-        }
+        $db->add_host($sysid, $host, $port);
+        exec_postcmd();
+    },
+    cat => sub {
+        die "no pubkeys parsed\n" if !read_from_fh(undef, 'stdin');
     },
     keyscan => sub {
-        my $mode    = shift;
-        my @command = qw(ssh-keyscan);
-        GetOptionsFromArray( \@ARGV, 'port|p=s' => \my $port ) or exit 1;
-        my $host = shift @ARGV;
-        if ( !defined $host ) {
-            die "Usage: irulan $mode hostname-or-ip\n";
-        }
-        if ( defined $port ) {
-            die "invalid port number\n" if !looks_like_number $port;
-            push @command, '-p', int $port;
-        }
-        open( my $fh, '-|', @command, '--', $host )
+        my ($host, $port) = hostport(@ARGV);
+        die "Usage: irulan keyscan hostname [port]\n" if !defined $host;
+        my @command = (qw(ssh-keyscan -p), $port);
+        open(my $fh, '-|', @command, '--', $host)
           or die "command @command failed: $!\n";
-        binmode $fh;
-        my $pubkeys = Data::SSHPubkey::pubkeys(
-            \do { local $/; readline $fh }
-        );
-        if ( !@$pubkeys ) {
-            # this may happen if a host is only offering RSA1 or DSA
-            # keys or if the ssh-keygen output format changes (unlikely?)
-            die "could not parse any pubkeys for $host ??\n";
-        }
-        Web::Irulan::DB::new_system( Data::UUID->new->create_str(),
-            $host, map { $_->[1] } @$pubkeys );
+        die "no pubkeys for $host ??\n" if !read_from_fh($fh, $host);
     },
     list => sub {
-        my $hosts = Web::Irulan::DB::list_hosts;
-        my %stash;
-        for my $ref (@$hosts) {
-            my ( $sysid, $hostname ) = @$ref;
-            next unless defined $sysid;    # empty database?
-            push @{ $stash{$sysid} }, $hostname;
-        }
-        for my $key ( sort { $a <=> $b } keys %stash ) {
-            say $key, ' ', join ',', @{ $stash{$key} };
+        my $ret = $db->hosts;
+        my %seen;
+        while (my $host = $ret->hash) {
+            my $hp = $host->{hostname} . ':' . $host->{port};
+            warn "duplicate entry for $hp" if $seen{$hp}++;
+            say $host->{sysid}, ' ', $host->{hostname},
+              ($host->{port} == 22 ? '' : ' ' . $host->{port});    # hp22
         }
     },
     rmhost => sub {
-        my $mode = shift;
-        my ($hostname) = @ARGV;
-        if ( !defined $hostname or !length $hostname or $hostname !~ m/\./ ) {
-            die "Usage: irulan $mode fqhostname\n";
-        }
-        my ( $status, $msg ) = Web::Irulan::DB::rm_host($hostname);
-        if ( !defined $status ) {
-            die $msg;
-        }
-        syslog 'warning', 'removed host ' . $hostname;
+        my ($host, $port) = hostport(@ARGV);
+        die "Usage: irulan rmhost hostname [port]\n" if !defined $host;
+        $db->remove_host($host, $port);
+        exec_postcmd();
     },
     rmsystem => sub {
-        my $mode = shift;
-        my ($sysid) = @ARGV;
-        if ( !defined $sysid or $sysid !~ m/^\d+$/a ) {
-            die "Usage: irulan $mode sysid\n";
-        }
-        my ( $status, $msg ) = Web::Irulan::DB::rm_system($sysid);
-        if ( !defined $status ) {
-            die $msg;
-        }
-        syslog 'warning', 'removed system ' . $sysid;
+        my $sysid = $ARGV[0];
+        die "Usage: irulan rmsystem sysid\n"
+          if !defined $sysid or $sysid !~ m/^\d+$/a;
+        $db->remove_system($sysid);
+        exec_postcmd();
     },
     ssh_known_hosts => sub {
-        my $mode  = shift;
-        my $hosts = Web::Irulan::DB::host_pubkeys;
-        for my $ref ( sort { $a->{id} <=> $b->{id} } values %$hosts ) {
-            my $alts = alternize $ref->{hosts};
-            for my $pk ( sort @{ $ref->{pubkey} } ) {
-                say $alts, ' ', $pk;
-            }
+        my $notbefore = $ARGV[0];
+        if (defined $notbefore and length $notbefore) {
+            die "invalid epoch value\n" if !looks_like_number $notbefore;
+            exit 2 if $db->most_recent <= int $notbefore;
         }
-        syslog 'warning', 'generated ssh_known_hosts data';
+        my $s   = '';
+        my $ret = $db->host_pubkeys;
+        while (my $h = $ret->hash) {
+            my $alts = alternize($h->{hostname}, $h->{port});
+            say $alts, ' ', $h->{pubkey};
+        }
     },
     unhosted => sub {
-        my $mode   = shift;
-        my $unhost = Web::Irulan::DB::unhosted;
-        for my $ref ( values %$unhost ) {
-            # this will happen for various hosts with bad or no IPv6
-            # address set (some hosts MUST NOT have IPv6 records in DNS
-            # but RedHat tries really hard to turn that on and give
-            # hosts random SLAAC addresses...)
-            eval { $ref->{'host?'} = ip_to_host $ref->{info}; };
-            if ($@) {
-                warn 'PTR lookup failed for ' . $ref->{info} . "\n";
-            }
-            say join( "\n", map { "$_\t$ref->{$_}" } sort keys %$ref ) . "\n";
+        my $ret = $db->unhosted;
+        while (my $sys = $ret->hash) {
+            say join ' ', map { $sys->{$_} } qw(sysid uuid info);
         }
     },
 );
 
-sub emit_help {
-    my $modes = join ', ', sort keys %dispatch;
-    die "Usage: irulan mode [mode-options]\n  modes: $modes\n";
+# this catches flags before or after the command as I found myself using
+# both locations while writing the tests
+GetOptions(
+    'help|h|?' => \&emit_help,
+    'n'        => \$Flag_NoLookup,
+    'P=s'      => \$Flag_PostCmd,
+);
+my $cmd = shift;
+emit_help() unless defined $cmd and exists $commands{$cmd};
+$commands{$cmd}->();
+
+# hostname -> hostname,ip; ip -> ip; host:2222 -> [host]:2222,[ip]:2222; etc
+sub alternize {
+    my ($host, $port) = @_;
+    my %alts;
+    # NOTE canon() necessary here as the OpenSSH client does simple
+    # string matching on the known_hosts data; that is, OpenSSH will not
+    # match 2001:0db8:0000:0000:0000:0000:c000:022a but will match
+    # 2001:db8::c000:22a. the following assumes that $host is either a
+    # hostname or already a IP address in canonical form
+    @alts{
+        $host, map { NetAddr::IP->new($_)->canon } $Flag_NoLookup ? () : ip_addrs($host)
+    } = ();
+    # TODO may want more complicated sort that puts the hostname (if
+    # any) before the IP addresses, KLUGE done here via a reverse sort
+    return join ',',
+      map { $port == 22 ? $_ : "[$_]:$port" } sort { $b cmp $a } keys %alts;
 }
 
-my $mode = shift;
-emit_help if !defined $mode or !exists $dispatch{$mode};
-$dispatch{$mode}->($mode);
+sub emit_help {
+    say STDERR "Usage: irulan command [cmd-args ..]\n  commands: " . join ', ',
+      sort keys %commands;
+    exit 64;
+}
+
+sub exec_postcmd {
+    if ($Flag_PostCmd) {
+        exec($Flag_PostCmd) or say STDERR "could not exec $Flag_PostCmd: $!";
+    }
+}
+
+sub hostport {
+    my ($host, $port) = @_;
+    # NOTE some sites may want stronger verification of hostnames (e.g.
+    # that only fully qualified hostnames are supplied)
+    undef $host if !defined $host or !length $host;
+    if (defined $port and length $port) {
+        die "invalid port number\n" if !looks_like_number $port;
+        $port = int $port;
+    } else {
+        $port = 22;
+    }
+    return $host, $port;
+}
+
+# NIx_* first show up in perl 5.16.0 Socket.pm docs, not in perl 5.14 so
+# that's where the minimum version bar is set
+sub ip_addrs {
+    my ($host) = @_;
+    my ($err, @res) = getaddrinfo($host, "", { socktype => SOCK_RAW });
+    die "getaddrinfo failed: $err" if $err;
+    my @ips;
+    while (my $ai = shift @res) {
+        my ($err, $ipaddr) = getnameinfo($ai->{addr}, NI_NUMERICHOST, NIx_NOSERV);
+        die "getnameinfo failed: $err" if $err;
+        push @ips, $ipaddr;
+    }
+    return @ips;
+}
+
+sub read_from_fh {
+    my ($fh, $info) = @_;
+    my $pubkeys = pubkeys(
+        \do {
+            local $/;
+            if (defined $fh) { binmode $fh; readline $fh }
+            else             { readline }
+        }
+    );
+    return 0 if !@$pubkeys;
+    $db->add_system(Data::UUID->new->create_str,
+        $info, [ map { $_->[1] } @$pubkeys ]);
+    return 1;
+}

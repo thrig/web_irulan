@@ -1,42 +1,62 @@
 Web::Irulan
 
-is the parts for a Mojolicious webapp and some command line toolage that
-assists with the collection and distribution of SSH host keys from and
-to client systems. it makes various OpenSSH assumptions, relies on
-SQLite, and will need some amount of tweakage (hence "parts for") to fit
-into a particular environment
+is a Mojolicious webapp and some associated scripts that assist with
+the collection and distribution of SSH host keys from and to client
+systems. only OpenSSH clients are supported, though the Data::SSHPubkey
+related code could be adjusted to accept and convert public keys in the
+PEM PKCS8 RFC4716 forms, if need be
 
- * a sqlite database will need to be setup (or convert this to use
-   Mojo::Pg or similar); see irulan.schema
- * Web::Irulan will need to be configured in a webserver (see Mojo docs
-   for how to do that in your environment)
- * client systems can use curl(1) to upload their SSH public keys using
-   `irulan-upload` (see the scripts dir). this can be improved with
-   stronger verification of the server or to (via KickStart or at build
-   time) get a UUID the server already knows about to the client to
-   better verify that
- * the `irulan` script is used on the server to manipulate the contents
-   of the Irulan database. this also could be done via a web interface,
-   but I do not like those
- * search for TODOFIXME things in the code for where changes are
-   required (the work version of this code is deployed with Ansible
-   which handles filling in various details that might be better done
-   via web-irulan.conf)
+ * client systems can upload their SSH public keys with `irulan-upload`
+   (or similar code) at install time e.g. via a package installed during
+   KickStart or as part of a virt image
+ * the main driver is irulan(1) a command line tool interface to the
+   Irulan database; this tool can associate client key uploads with a
+   particular host, wraps ssh-keyscan, etc
 
-in particular with `irulan-upload` installed and run on client systems
-(during KickStart, with some more work to schedule it as a cron job if
-the initial upload fails) adding a new system can be as easy as
 
-    $ irulan unhosted
-    ...
-    $ irulan addhost 1234 foo.example.edu
+Customization
 
-clients periodically try to update their ssh_known_hosts file from what
-Irulan can make available. this in practice is less effort than manually
-obtaining, maintaining, and pushing out ssh_known_hosts, and unlike a
-static ssh_known_hosts file hand maintained under version control can be
-regenerated automatically with updated DNS information, etc
+ * edit web-irulan.conf and customize the authkey value, where the
+   database lives, etc (SQLite needs write access to the directory the
+   datbase lives in, but ideally not writes access to the Irulan code or
+   configuration). if paranoid setup TLS authentication so that the
+   client and server better verify one another
+ * Web::Irulan will need to be deployed somehow; see the Mojolicous
+   deployment docs. MOJO_REVERSE_PROXY may need to be set if Web::Irulan
+   is running on some not-/ path
+ * irulan(1) will likely need to be available in PATH somehow, and the
+   documentation installed to a MANPATH directory
+ * edit `irulan-upload` as necessary so client systems can upload their
+   SSH keys, or instead only use the keyscan support in irulan(1)
+ * cron(8) jobs may be necessary to automatically maintain and check
+   various information, or have Irulan itself generate ssh_known_hosts
+   on the fly (I do not do that, so that should Irulan break there will
+   still a ssh_known_file for clients to get).
 
-(TODO mostly an untested conversion of internal code from $work plus
-(also untested!) support for not-22 port sshd. needs a bunch cleanups
-and improvements to be a better drop-in-and-use it solution...)
+
+Development
+
+  make depend
+  make test
+
+and then if something is awry probably
+
+  IRULAN_KEYSCAN=localhost     prove -lv t/irulan.t
+  IRULAN_KEYSCAN="localhost 2" prove -lv t/irulan.t
+
+  MOJO_LOG_LEVEL=debug prove -l t/ssh-hostkeys.t
+
+while fiddling with the code; it may also be necessary to have the test
+scripts not unlink the temporary database directory used and then to use
+sqlite3(1) to interact with the database file
+
+
+History
+
+this tool replaced the manual collection of ssh host keys, which were
+then manually copied into an Ansible repo and then manually checked in
+and then manually pushed out to client systems...and sometimes folks
+would for some reason forget to do all those steps and there would be
+some new host with keys only in ~/.ssh/known_hosts for some user, so
+someone else would need to do the above steps, and eventually various
+~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts would differ...
