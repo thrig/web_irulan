@@ -39,16 +39,18 @@ Development
   make depend
   make test
 
+full tests require a host running ssh to connect to:
+
+  IRULAN_KEYSCAN=localhost     prove -l t/irulan.t
+  IRULAN_KEYSCAN="localhost 2" prove -l t/irulan.t
+
 and then if something is awry probably
 
-  IRULAN_KEYSCAN=localhost     prove -lv t/irulan.t
-  IRULAN_KEYSCAN="localhost 2" prove -lv t/irulan.t
-
+  IRULAN_KEEPDB=1      prove -l t/irulan.t
   MOJO_LOG_LEVEL=debug prove -l t/ssh-hostkeys.t
 
-while fiddling with the code; it may also be necessary to have the test
-scripts not unlink the temporary database directory used and then to use
-sqlite3(1) to interact with the database file
+while fiddling with the code; the KEEPDB should leave an irulan.db file
+somewhere on the system for inspection and use
 
 
 History

@@ -12,6 +12,7 @@ use Mojo::SQLite;
 use NetAddr::IP qw(:lower);    # 'lower' due to RFC 5952
 use Scalar::Util qw(looks_like_number);
 use Socket qw(:addrinfo SOCK_RAW);
+use Text::ParseWords qw(shellwords);
 use FindBin;
 BEGIN { unshift @INC, "$FindBin::Bin/../lib" }
 use Web::Irulan::Model::Hostkeys;
@@ -21,13 +22,19 @@ my $db  = Web::Irulan::Model::Hostkeys->new(sqlite => $msl);
 
 my ($Flag_NoLookup, $Flag_PostCmd);
 
-# TODO "audit" support where each individual pubkey for each host is
-# tested for validity
-# TODO support "tags" table and from that generate custom known_hosts
-# based on those tags (so that internal hosts can have one list of
-# known_hosts, and external clients another)
+# had planned an "audit" command to check known_hosts records but
+# that is probably best handled by other tools that can iterate
+# through the ssh_known_hosts output and check as necessary that the
+# host keys are valid
+#
+# had also planned on "tags" to support selection of particular sets of
+# known hosts, but that could also be done by grep or such also against
+# the ssh_known_hosts output, e.g. so that internal systems see
+# different sets of host keys than external clients who only get gateway
+# systems, etc
 my %commands = (
     addhost => sub {
+        my ($cmd) = @_;
         my $sysid = $ARGV[0];
         my ($host, $port) = hostport(@ARGV[ 1, 2 ]);
         die "Usage: irulan addhost sysid hostname [port]\n"
@@ -35,21 +42,44 @@ my %commands = (
           or $sysid !~ m/^\d+$/a
           or !defined $host;
         if (!$Flag_NoLookup) {
-            die "error: no IP associated with $host\n" unless ip_addrs($host);
+            die "irulan: no IP associated with $host\n" unless ip_addrs($host);
         }
         $db->add_host($sysid, $host, $port);
-        exec_postcmd();
+        exec_postcmd($cmd);
     },
     cat => sub {
-        die "no pubkeys parsed\n" if !read_from_fh(undef, 'stdin');
+        my %pubkeys;
+        if (@ARGV) {
+            my $done_stdin = 0;
+            for my $arg (@ARGV) {
+                if ($arg eq '-' and !$done_stdin) {
+                    @pubkeys{ map { $_->[1] } @{ read_from_fh() } } = ();
+                    $done_stdin = 1;
+                } else {
+                    open my $fh, '<', $arg or die "irulan: could not open $arg: $!\n";
+                    @pubkeys{ map { $_->[1] } @{ read_from_fh($fh) } } = ();
+                }
+            }
+        } else {
+            @pubkeys{ map { $_->[1] } @{ read_from_fh() } } = ();
+        }
+        die "irulan: no pubkeys parsed\n" unless %pubkeys;
+        $db->add_system(Data::UUID->new->create_str, 'cat ' . time(),
+            [ keys %pubkeys ]);
     },
     keyscan => sub {
         my ($host, $port) = hostport(@ARGV);
         die "Usage: irulan keyscan hostname [port]\n" if !defined $host;
         my @command = (qw(ssh-keyscan -p), $port);
         open(my $fh, '-|', @command, '--', $host)
-          or die "command @command failed: $!\n";
-        die "no pubkeys for $host ??\n" if !read_from_fh($fh, $host);
+          or die "irulan: @command failed: $!\n";
+        my $pubkeys = read_from_fh($fh);
+        die "irulan: no pubkeys parsed\n" unless @$pubkeys;
+        $db->add_system(
+            Data::UUID->new->create_str,
+            ($port == 22 ? $host : "$host $port"),
+            [ map { $_->[1] } @$pubkeys ]
+        );
     },
     list => sub {
         my $ret = $db->hosts;
@@ -58,30 +88,32 @@ my %commands = (
             my $hp = $host->{hostname} . ':' . $host->{port};
             warn "duplicate entry for $hp" if $seen{$hp}++;
             say $host->{sysid}, ' ', $host->{hostname},
-              ($host->{port} == 22 ? '' : ' ' . $host->{port});    # hp22
+              ($host->{port} == 22 ? '' : ' ' . $host->{port});
         }
     },
     rmhost => sub {
+        my ($cmd) = @_;
         my ($host, $port) = hostport(@ARGV);
         die "Usage: irulan rmhost hostname [port]\n" if !defined $host;
         $db->remove_host($host, $port);
-        exec_postcmd();
+        exec_postcmd($cmd);
     },
     rmsystem => sub {
+        my ($cmd) = @_;
         my $sysid = $ARGV[0];
         die "Usage: irulan rmsystem sysid\n"
           if !defined $sysid or $sysid !~ m/^\d+$/a;
         $db->remove_system($sysid);
-        exec_postcmd();
+        exec_postcmd($cmd);
     },
     ssh_known_hosts => sub {
         my $notbefore = $ARGV[0];
         if (defined $notbefore and length $notbefore) {
-            die "invalid epoch value\n" if !looks_like_number $notbefore;
+            die "irulan: invalid epoch value\n" if !looks_like_number $notbefore;
             exit 2 if $db->most_recent <= int $notbefore;
         }
         my $s   = '';
-        my $ret = $db->host_pubkeys;
+        my $ret = $db->known_hosts;
         while (my $h = $ret->hash) {
             my $alts = alternize($h->{hostname}, $h->{port});
             say $alts, ' ', $h->{pubkey};
@@ -104,7 +136,7 @@ GetOptions(
 );
 my $cmd = shift;
 emit_help() unless defined $cmd and exists $commands{$cmd};
-$commands{$cmd}->();
+$commands{$cmd}->($cmd);
 
 # hostname -> hostname,ip; ip -> ip; host:2222 -> [host]:2222,[ip]:2222; etc
 sub alternize {
@@ -131,8 +163,10 @@ sub emit_help {
 }
 
 sub exec_postcmd {
+    my ($cmd) = @_;
     if ($Flag_PostCmd) {
-        exec($Flag_PostCmd) or say STDERR "could not exec $Flag_PostCmd: $!";
+        { exec shellwords($Flag_PostCmd), $cmd };
+        die "irulan: could not exec $Flag_PostCmd: $!\n";
     }
 }
 
@@ -142,7 +176,7 @@ sub hostport {
     # that only fully qualified hostnames are supplied)
     undef $host if !defined $host or !length $host;
     if (defined $port and length $port) {
-        die "invalid port number\n" if !looks_like_number $port;
+        die "irulan: invalid port number\n" if !looks_like_number $port;
         $port = int $port;
     } else {
         $port = 22;
@@ -155,27 +189,23 @@ sub hostport {
 sub ip_addrs {
     my ($host) = @_;
     my ($err, @res) = getaddrinfo($host, "", { socktype => SOCK_RAW });
-    die "getaddrinfo failed: $err" if $err;
+    die "irulan: getaddrinfo failed '$host': $err\n" if $err;
     my @ips;
     while (my $ai = shift @res) {
         my ($err, $ipaddr) = getnameinfo($ai->{addr}, NI_NUMERICHOST, NIx_NOSERV);
-        die "getnameinfo failed: $err" if $err;
+        die "irulan: getnameinfo failed '$host': $err\n" if $err;
         push @ips, $ipaddr;
     }
     return @ips;
 }
 
 sub read_from_fh {
-    my ($fh, $info) = @_;
-    my $pubkeys = pubkeys(
+    my ($fh) = @_;
+    pubkeys(
         \do {
             local $/;
             if (defined $fh) { binmode $fh; readline $fh }
             else             { readline }
         }
     );
-    return 0 if !@$pubkeys;
-    $db->add_system(Data::UUID->new->create_str,
-        $info, [ map { $_->[1] } @$pubkeys ]);
-    return 1;
 }

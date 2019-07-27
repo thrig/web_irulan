@@ -1,4 +1,4 @@
-.Dd July 26 2019
+.Dd July 27 2019
 .Dt IRULAN 1
 .nh
 .Os
@@ -17,7 +17,7 @@
 .Nm
 interacts with the Irulan database of the Web::Irulan Perl module and
 provides various commands related to the management of ssh host keys. It
-is run on the same host that the Irulan database is hosted on.
+runs on the same host that the Irulan database is hosted on.
 .Ss Options
 These may appear before or after the
 .Ar command .
@@ -25,13 +25,25 @@ These may appear before or after the
 .It Fl P Ar program
 Program to exec when a
 .Ar command
-that alters the database is run.
+that alters the database is run. The
+.Ar command
+name is passed as the first argument to the
+.Ar program
+and can be used to determine whether a subsequent
+.Nm
+.Cm ssh_known_hosts
+command can use epoch time caching or not: yes for
+.Cm addhost
+and no for 
+.Cm rmhost
+or
+.Cm rmsystem .
 .It Fl n 
 Do not perform hostname to IP address conversions. Not recommended with the
 .Cm ssh_known_hosts
 command if there are hostnames in the database, as 
 .Xr ssh 1
-may add entries for IP addresses to
+may then add entries for IP addresses to
 .Pa known_hosts
 files.
 .El
@@ -47,9 +59,14 @@ Associates a system ID with a particular hostname. Use the
 or
 .Cm unhosted
 commands to see existing or pending records to add.
-.It Cm cat Op Ar file ..
+Executes the
+.Fl P Ar program
+with
+.Ar addhost
+as the first argument.
+.It Cm cat Op Ar file|- ..
 Parses public keys from the given files or standard input and associates
-those keys with a new system.
+all the keys parsed with a new system.
 .It Cm keyscan Ar host Op Ar port
 Scans a system using
 .Xr ssh-keyscan 1
@@ -64,18 +81,36 @@ Lists the records in the database.
 Removes a host mapping for a particular system. Use this if a CNAME
 now points to a new host, or if a raw IP address in the database
 has changed.
+Executes the
+.Fl P Ar program
+with
+.Ar rmhost
+as the first argument.
 .It Cm rmsystem Ar sysid
 Removes a system and all associated records from the database, such as
 when a host is completely retired.
+Executes the
+.Fl P Ar program
+with
+.Ar rmsystem
+as the first argument.
 .It Cm ssh_known_hosts Op Ar epoch
 Generates ssh known hosts data to standard output. Hostnames will be
-resolved to determine their IP address(es). If a unix epoch time value
-is provided, the data will be generated only if any record is more
-recent than the given epoch value.
+resolved to determine their IP address(es) unless the
+.Fl n
+flag is given. If a unix epoch time value is provided, the data will be
+generated only if any record is more recent than the given epoch value.
 .It Cm unhosted
-Lists systems that have no host that point to that system. Use
+Lists systems that have no associated host. Use
 .Cm addhost
-to associate a host with a particular system entry.
+to associate a host with a system entry.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Dv IRULAN_DB_PATH
+Specifies the path to the Irulan database. This path should agree with
+what the Web::Irulan web application uses, as the web application will
+setup the database schema when it starts.
 .El
 .Sh EXIT STATUS
 .Ex -std
@@ -86,7 +121,7 @@ flag replaces
 .Nm
 with the given
 .Ar program
-so when that is used the exit status will come from that tool.
+so when that is used the exit status will be of that tool.
 .Sh EXAMPLES
 Assuming a client has uploaded public keys and an admin has been
 notified about this somehow, the system associated with the client can
@@ -98,24 +133,38 @@ be found and then a hostname record added for that client.
 .Pp
 would display what system records have no corresponding hostname
 associated with them, and the second command would associate that
-specific hostname with the system record. Hosts must manually be
-associated with system records.
+specific hostname with system id 123. Hosts must manually be added.
 .Pp
-.Dl $ Ic irulan ssh_known_hosts > ~/.ssh/kh.irulan
+A script such as
 .Pp
-Might then be used to export the known hosts, and this information would
-become or could be merged into existing
-.Pa known_hosts
-files.
+.Dl #!/bin/sh
+.Dl set -e
+.Dl cd \&"$HOME\&"/.ssh
+.Dl irulan ssh_known_hosts > kh.irulan
+.Dl cat kh.* > known_hosts
+.Pp
+could then be used to export the known hosts and build
+.Pa ~/.ssh/known_hosts
+for a user. Another option would be to store all the ssh host keys for
+an organization and export from
+.Nm
+into 
+.Pa /etc/ssh/ssh_known_hosts
+on all the hosts.
+.Pp
+The known hosts for this system might be collected with
+.Cm cat :
+.Pp
+.Dl $ Ic irulan cat /etc/ssh/ssh_host_*.pub 
 .Pp
 Loopback or private network virts running on strange ports without DNS
-can also be added:
+can also be added
 .Pp
 .Dl $ Ic irulan -n keyscan 192.0.2.42 2222
-.Dl ...
 .Pp
-New hosts must always be added manually (presumably so that someone
-verifies that the change makes sense).
+though these may not suit a globally deployed
+.Pa ssh_known_hosts
+file if they can only be reached by a subset of the systems.
 .Sh SEE ALSO
 .Xr ssh-config 5 ,
 .Xr ssh-keyscan 1

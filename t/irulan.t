@@ -13,12 +13,12 @@ use Test::More;
 use Test::UnixExit;
 use Web::Irulan::Model::Hostkeys;
 
-# init an empty database, somewhere (to debug, set CLEANUP => 0 and then
-# inspect the resulting irulan.db in the temporary directory)
+# init an empty database, somewhere
 BEGIN {
-    my $dir = tempdir("irulan.XXXXXXXXXX", CLEANUP => 1, TMPDIR => 1);
+    my $clean = $ENV{IRULAN_KEEPDB} ? 0 : 1;
+    my $dir   = tempdir("irulan.XXXXXXXXXX", CLEANUP => $clean, TMPDIR => 1);
     $ENV{IRULAN_DB_PATH} = catfile($dir, 'irulan.db');
-    #diag "IRULAN_DB_PATH=$ENV{IRULAN_DB_PATH}";
+    diag "IRULAN_DB_PATH=$ENV{IRULAN_DB_PATH}" unless $clean;
 }
 my $msl = Mojo::SQLite->new->from_filename($ENV{IRULAN_DB_PATH});
 my $wmh = Web::Irulan::Model::Hostkeys->new(sqlite => $msl);
@@ -63,7 +63,7 @@ irulan args => 'cat t/x.pub';
 is $db->query(q{SELECT COUNT(*) FROM systems})->array->[0], 1;
 
 my ($sysid, $info) = @{ $db->query(q{SELECT sysid,info FROM systems})->array };
-is $info, 'stdin';
+like $info, qr/^cat \d+/;
 is $db->query(q{SELECT COUNT(*) FROM sshkeys})->array->[0], 1;
 
 my ($refid, $pubkey) =
@@ -75,7 +75,7 @@ is $pubkey, $edkey;
 irulan args => 'list';
 
 # new key should be unhosted, lacking a host record
-irulan args => 'unhosted', stdout => qr/^$sysid $uuid_re stdin$/;
+irulan args => 'unhosted', stdout => qr/^$sysid $uuid_re cat \d+$/;
 
 # in theory there should be a "localhost" entry that points to 127.0.0.1
 # in practice folks break DNS or /etc/hosts in strange ways
@@ -86,7 +86,6 @@ irulan args => "addhost $sysid localhost";
 # sysid now associated with hostname
 irulan args => 'list', stdout => qr/^$sysid localhost$/;
 
-# ssh_known_hosts (w/ w/o epoch) (w/ w/o -n)
 # NOTE DNS or /etc/hosts results may not be portable hence the loose match
 irulan args => 'ssh_known_hosts', stdout => qr/^\S*localhost\S+ $edkey/;
 
@@ -114,7 +113,10 @@ irulan args => "rmhost 127.0.0.1 $randport";
 irulan args => 'list', stdout => qr/^$sysid localhost$/;
 
 # NOTE $^X may not be portable, see perldoc -v '$^X'
-irulan args => qq(-P "$^X -e 'exit 42'" rmsystem $sysid), status => 42;
+irulan
+  args   => qq(-P "$^X -E 'say shift; exit 42'" rmsystem $sysid),
+  status => 42,
+  stdout => qr/^rmsystem$/;
 
 irulan args => 'list';
 

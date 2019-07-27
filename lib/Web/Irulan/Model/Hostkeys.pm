@@ -36,14 +36,16 @@ sub hosts {
 # rsync-based file distribution or backup systems)
 # hmm, want all records but abort if none are more recent than ... maybe
 # want some other query to see if there's a mtime and then call this
-sub host_pubkeys {
-    my ($self, $epoch) = @_;
-    $self->sqlite->db->query(
-        q{SELECT h.hostname,h.port,s.pubkey,h.mtime AS mtime1,s.mtime AS mtime2 FROM hosts h INNER JOIN sshkeys s USING (sysid) ORDER BY h.hostname,h.port,s.pubkey});
+sub known_hosts {
+    $_[0]->sqlite->db->query(
+        q{SELECT h.hostname,h.port,s.pubkey,h.mtime AS mtime1,s.mtime AS mtime2 FROM hosts h INNER JOIN sshkeys s USING (sysid) ORDER BY h.hostname,h.port,s.pubkey}
+    );
 }
 
 sub most_recent {
-    $_[0]->sqlite->db->query(q{SELECT max(mtime) FROM (SELECT mtime FROM systems UNION SELECT mtime FROM hosts UNION SELECT mtime FROM sshkeys)})->array->[0];
+    $_[0]->sqlite->db->query(
+        q{SELECT max(mtime) FROM (SELECT mtime FROM systems UNION SELECT mtime FROM hosts UNION SELECT mtime FROM sshkeys)}
+    )->array->[0];
 }
 
 sub remove_host {
@@ -54,7 +56,7 @@ sub remove_host {
 sub remove_system {
     my ($self, $sysid) = @_;
     my $db = $self->sqlite->db;
-    for my $table (qw{tags sshkeys hosts systems}) {
+    for my $table (qw{sshkeys hosts systems}) {
         $db->delete($table, { sysid => $sysid });
     }
 }

@@ -11,3 +11,4 @@ requires 'Scalar::Util';
 requires 'Test::Cmd';
 requires 'Test::More', '>= 0.88';
 requires 'Test::UnixExit';
+requires 'Text::ParseWords';
