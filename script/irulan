@@ -53,15 +53,15 @@ my %commands = (
             my $done_stdin = 0;
             for my $arg (@ARGV) {
                 if ($arg eq '-' and !$done_stdin) {
-                    @pubkeys{ map { $_->[1] } @{ read_from_fh() } } = ();
+                    @pubkeys{ map { $_->[1] } read_from_fh() } = ();
                     $done_stdin = 1;
                 } else {
                     open my $fh, '<', $arg or die "irulan: could not open $arg: $!\n";
-                    @pubkeys{ map { $_->[1] } @{ read_from_fh($fh) } } = ();
+                    @pubkeys{ map { $_->[1] } read_from_fh($fh) } = ();
                 }
             }
         } else {
-            @pubkeys{ map { $_->[1] } @{ read_from_fh() } } = ();
+            @pubkeys{ map { $_->[1] } read_from_fh() } = ();
         }
         die "irulan: no pubkeys parsed\n" unless %pubkeys;
         $db->add_system(Data::UUID->new->create_str, 'cat ' . time(),
@@ -73,12 +73,12 @@ my %commands = (
         my @command = (qw(ssh-keyscan -p), $port);
         open(my $fh, '-|', @command, '--', $host)
           or die "irulan: @command failed: $!\n";
-        my $pubkeys = read_from_fh($fh);
-        die "irulan: no pubkeys parsed\n" unless @$pubkeys;
+        my @pubkeys = read_from_fh($fh);
+        die "irulan: no pubkeys parsed\n" unless @pubkeys;
         $db->add_system(
             Data::UUID->new->create_str,
             ($port == 22 ? $host : "$host $port"),
-            [ map { $_->[1] } @$pubkeys ]
+            [ map { $_->[1] } @pubkeys ]
         );
     },
     list => sub {
@@ -201,11 +201,12 @@ sub ip_addrs {
 
 sub read_from_fh {
     my ($fh) = @_;
-    pubkeys(
-        \do {
-            local $/;
-            if (defined $fh) { binmode $fh; readline $fh }
-            else             { readline }
-        }
-    );
+    @{  pubkeys(
+            \do {
+                local $/;
+                if (defined $fh) { binmode $fh; readline $fh }
+                else             { readline }
+            }
+        )
+    };
 }

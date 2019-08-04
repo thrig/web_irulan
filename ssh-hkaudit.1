@@ -1,0 +1,99 @@
+.Dd August  4 2019
+.Dt SSH-HKAUDIT 1
+.nh
+.Os
+.Sh NAME
+.Nm ssh-hkaudit
+.Nd ssh known_host audit utility
+.Sh SYNOPSIS
+.Bk -words
+.Nm
+.Op Fl 46
+.Op Fl n
+.Ar known-host-file
+.Ar host
+.Op Ar port
+.Ek
+.Sh DESCRIPTION
+.Nm
+connects via SSH to the given
+.Ar host
+and optional
+.Ar port
+and attempts to verify the SSH known hosts against the
+.Ar known-host-file .
+A minimal SSH connection is made; the connection exits before
+authentication.
+.Pp
+Options:
+.Bl -tag -width Ds
+.It Fl 4
+force the use of IPv4. The default is to use
+.Dv AF_UNSPEC .
+.It Fl 6
+force the use of IPv6.
+.It Fl n
+Treat the
+.Ar host
+as a numeric address.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Pp
+In particular,
+.Bl -tag -width Ds
+.It Dv 0
+a host key was verified. Nothing should be printed to standard output.
+.It Dv 1
+is a generic error and likely indicates some low level problem.
+.It Dv 7
+no socket connection could be established with the
+.Ar host .
+.It Dv 10
+there was a host key mismatch; text will be printed to standard output.
+.It Dv 11
+the host key was not found in the
+.Ar known-host-file .
+Text will be printed to standard output.
+.It Dv 12
+Something prevented the check from being made. Text to standard output.
+.It Dv 13
+unknown error from
+.Xr libssh2_knownhost_check 3 ,
+check the documentation for changes? Text to standard output.
+.El
+.Sh EXAMPLES
+No news is good news.
+.Pp
+.Dl $ Ic ssh-hkaudit ~/.ssh/known_hosts localhost 22
+.Dl $ Ic echo $?
+.Dl 0
+.Pp
+.Nm
+will leave particular logs as it disconnects prior to authentication.
+.Pp
+.Dl ... Connection from ::1 port 3973 on ::1 port 22 rdomain "0"
+.Dl ... Received disconnect from ::1 port 3973:11: shutdown [preauth]
+.Dl ... Disconnected from ::1 port 3973 [preauth]
+.Pp
+An alternative method would be to use
+.Xr ssh-keyscan 1
+to collect known hosts information and then compare what that found with
+the existing records; this may be more compatbile with servers that
+libssh2 cannot negotiate a connection with:
+.Pp
+.Dl ... Unable to negotiate with ...: no matching MAC found.
+.Pp
+This is due to a OpenSSH 8.0 server offering only:
+.Pp
+.Dl MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+.Sh SEE ALSO
+.Xr irulan 1 ,
+.Xr ssh-keyscan 1
+.Pp
+.Em https://github.com/thrig/web_irulan
+.Sh AUTHOR
+.An Jeremy Mates
+.Sh CAVEATS
+The interface to this tool may change to instead operate on lists of
+hosts and a batch report of the results.
