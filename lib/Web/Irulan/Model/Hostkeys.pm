@@ -48,6 +48,14 @@ sub most_recent {
     )->array->[0];
 }
 
+sub pubkeys {
+    my ($self, $host, $port) = @_;
+    $_[0]->sqlite->db->query(
+        q{SELECT pubkey FROM sshkeys WHERE sysid = (SELECT sysid FROM hosts WHERE hostname=? AND port=?)},
+        $host, $port
+    )->arrays->each;
+}
+
 sub remove_host {
     my ($self, $host, $port) = @_;
     $self->sqlite->db->delete('hosts', { hostname => $host, port => $port });

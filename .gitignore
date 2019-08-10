@@ -1,3 +1,5 @@
 *.core
 irulan.db*
+nytprof
+nytprof.out
 ssh-hkaudit

@@ -126,8 +126,13 @@ if ($ENV{IRULAN_KEYSCAN}) {
     # ssh-keyscan may produce noise on stderr
     irulan args => "keyscan -n $host$port", stderr => qr/^/;
     irulan args => 'unhosted', stdout => qr/^\d+ $uuid_re $host$port$/a;
+
+    my ($sysid, $info) = @{ $db->query(q{SELECT sysid,info FROM systems})->array };
+    irulan args => "addhost $sysid $host $port";
+    $ENV{IRULAN_AUDIT_CMD} = './ssh-hkaudit' unless exists $ENV{IRULAN_AUDIT_CMD};
+    irulan args => "audit $host $port", stdout => qr/^$host.*ok$/;
 } else {
-    diag 'set IRULAN_KEYSCAN to test keyscan support';
+    diag 'set IRULAN_KEYSCAN to test keyscan and audit support';
 }
 
 done_testing();

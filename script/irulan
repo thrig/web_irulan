@@ -6,32 +6,28 @@ use 5.16.0;
 use warnings;
 use open IN => qw(:bytes);
 use Data::SSHPubkey qw(pubkeys);
-use Data::UUID;
+use Data::UUID ();
+use File::Temp ();
 use Getopt::Long qw(GetOptions);
-use Mojo::SQLite;
 use NetAddr::IP qw(:lower);    # 'lower' due to RFC 5952
 use Scalar::Util qw(looks_like_number);
 use Socket qw(:addrinfo SOCK_RAW);
 use Text::ParseWords qw(shellwords);
 use FindBin;
-BEGIN { unshift @INC, "$FindBin::Bin/../lib" }
+
+BEGIN {
+    $ENV{$_} = 1 for qw(MOJO_NO_NNR MOJO_NO_SOCKS MOJO_NO_TLS);
+    unshift @INC, "$FindBin::Bin/../lib";
+}
+use Mojo::SQLite;
 use Web::Irulan::Model::Hostkeys;
 
 my $msl = Mojo::SQLite->new->from_filename($ENV{IRULAN_DB_PATH} // 'irulan.db');
 my $db  = Web::Irulan::Model::Hostkeys->new(sqlite => $msl);
 
-my ($Flag_NoLookup, $Flag_PostCmd);
+my ($Flag_NoLookup, $Flag_PostCmd, @audit_cmd);
+my $exit_status = 0;
 
-# had planned an "audit" command to check known_hosts records but
-# that is probably best handled by other tools that can iterate
-# through the ssh_known_hosts output and check as necessary that the
-# host keys are valid
-#
-# had also planned on "tags" to support selection of particular sets of
-# known hosts, but that could also be done by grep or such also against
-# the ssh_known_hosts output, e.g. so that internal systems see
-# different sets of host keys than external clients who only get gateway
-# systems, etc
 my %commands = (
     addhost => sub {
         my ($cmd) = @_;
@@ -46,6 +42,19 @@ my %commands = (
         }
         $db->add_host($sysid, $host, $port);
         exec_postcmd($cmd);
+    },
+    audit => sub {
+        die "irulan: IRULAN_AUDIT_CMD must be set\n"
+          if !exists $ENV{IRULAN_AUDIT_CMD}
+          or !length $ENV{IRULAN_AUDIT_CMD};
+        @audit_cmd = shellwords($ENV{IRULAN_AUDIT_CMD});
+        my ($host, $port) = hostport(@ARGV[ 0, 1 ]);
+        if (defined $host) {
+            audit_host($host, $port);
+            exit $exit_status;
+        } else {
+            audit_all();
+        }
     },
     cat => sub {
         my %pubkeys;
@@ -154,6 +163,34 @@ sub alternize {
     # any) before the IP addresses, KLUGE done here via a reverse sort
     return join ',',
       map { $port == 22 ? $_ : "[$_]:$port" } sort { $b cmp $a } keys %alts;
+}
+
+sub audit_all {
+    my $ret = $db->hosts;
+    while (my $h = $ret->hash) {
+        audit_host($h->{hostname}, $h->{port});
+    }
+    exit $exit_status;
+}
+
+# basically drop *only* the pubkeys for the host (so nothing else in
+# the database can match) into a temporary file and feed that to the
+# audit tool
+sub audit_host {
+    my ($host, $port) = @_;
+    my $alts    = alternize($host, $port);
+    my @pubkeys = $db->pubkeys($host, $port);
+    die "irulan: no public keys for $host:$port\n" if !@pubkeys;
+    my $fh   = File::Temp->new(TEMPLATE => "iraud.XXXXXXXXXX", TMPDIR => 1);
+    my $file = $fh->filename;
+    $fh->say($alts, ' ', $_->[0]) for @pubkeys;
+    if (system(@audit_cmd, $file, $host, $port) == 0) {
+        say "$host:$port ok";
+    } else {
+        warn "irulan: audit failed for $host:$port: $?\n";
+        say "$host:$port fail";
+        $exit_status = 1;
+    }
 }
 
 sub emit_help {

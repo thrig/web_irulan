@@ -14,7 +14,39 @@ PEM PKCS8 RFC4716 forms, if need be
    particular host, wraps ssh-keyscan, etc
 
 
-Customization
+Quick Use
+
+without any of the web stuff for clients to upload to:
+
+  $ make depend && make test
+  ...
+  $ perl -00nE '/1 up/ && say' schema/irulan.sql | sqlite3 irulan.db
+  $ ./script/irulan keyscan localhost
+  ...
+  $ ./script/irulan unhosted
+  1 FF776C88-BB06-11E9-BF73-33869E4C1D7A localhost
+  $ ./script/irulan addhost 1 localhost
+  $ ./script/irulan list
+  1 localhost
+  $ ./script/irulan ssh_known_hosts
+  localhost,::1,127.0.0.1 ...
+  ...
+
+and then there is rudimentary auditing support (insofar as libssh2
+can, though one could instead attempt a full ssh(1) connection to
+the hosts(s)):
+
+  $ make ssh-hkaudit
+  ...
+  $ IRULAN_AUDIT_CMD=./ssh-hkaudit ./script/irulan audit localhost
+  ...
+
+periodic diffs of the ssh_known_hosts data might also be good to review,
+especially if you setup automatic instead of manual "addhost"
+association of systems with hostnames
+
+
+Customization & Deployment
 
  * edit web-irulan.conf and customize the authkey value, where the
    database lives, etc (SQLite needs write access to the directory the
@@ -27,7 +59,8 @@ Customization
  * irulan(1) will likely need to be available in PATH somehow, and the
    documentation installed to a MANPATH directory
  * edit `irulan-upload` as necessary so client systems can upload their
-   SSH keys, or instead only use the keyscan support in irulan(1)
+   SSH keys, or instead only use the keyscan support in irulan(1). there
+   is also irulan-client.spec that can build an RPM for RedHat systems
  * cron(8) jobs may be necessary to automatically maintain and check
    various information, or have Irulan itself generate ssh_known_hosts
    on the fly (I do not do that, so that should Irulan break there will
@@ -49,8 +82,17 @@ and then if something is awry probably
   IRULAN_KEEPDB=1      prove -l t/irulan.t
   MOJO_LOG_LEVEL=debug prove -l t/ssh-hostkeys.t
 
-while fiddling with the code; the KEEPDB should leave an irulan.db file
-somewhere on the system for inspection and use
+while fiddling with the code; the IRULAN_KEEPDB=1 bit should leave an
+irulan.db file somewhere on the system to poke at
+
+
+TODO
+
+ * add "tags" support so certain hosts can say have a "public" tag and
+   everyone can see those, while internal hosts can get the full list?
+ * Mojo::SQLite is nice but makes irulan(1) slow to start up ...
+ * ssh-hkaudit - change to support connecting to a list of hosts and key
+   files instead of one host per invocation
 
 
 History

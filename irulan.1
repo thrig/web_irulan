@@ -1,4 +1,4 @@
-.Dd August  3 2019
+.Dd August 10 2019
 .Dt IRULAN 1
 .nh
 .Os
@@ -39,7 +39,7 @@ and no for
 or
 .Cm rmsystem .
 .It Fl n 
-Do not perform hostname to IP address conversions. Not recommended with the
+Do not perform hostname to IP address conversions. Not advised with the
 .Cm ssh_known_hosts
 command if there are hostnames in the database, as 
 .Xr ssh 1
@@ -64,9 +64,22 @@ Executes the
 with
 .Ar addhost
 as the first argument.
+.It Cm audit Op Ar host Op Ar port
+Audits the given host or lacking that all hosts by connecting to each
+host via the
+.Dv IRULAN_AUDIT_CMD
+that must be set; this command must support three arguments:
+.Bl -enum
+.It
+.Ar known-host-file
+.It
+.Ar host
+.It
+.Op Ar port
+.El
 .It Cm cat Op Ar file|- ..
-Parses public keys from the given files or standard input and associates
-all the keys parsed with a new system.
+Parses public keys from the given files or stdin and associates all the
+keys parsed with a new system.
 .It Cm keyscan Ar host Op Ar port
 Scans a system using
 .Xr ssh-keyscan 1
@@ -103,14 +116,17 @@ generated only if any record is more recent than the given epoch value.
 .It Cm unhosted
 Lists systems that have no associated host. Use
 .Cm addhost
-to associate a host with a system entry.
+to make such an association.
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width Ds
+.It Dv IRULAN_AUDIT_CMD
+Command used by the
+.Cm audit
+mode to check host key entries in the database.
 .It Dv IRULAN_DB_PATH
 Specifies the path to the Irulan database. This path should agree with
-what the Web::Irulan web application uses, as the web application will
-setup the database schema when it starts.
+what the Web::Irulan web application uses, if that is being used.
 .El
 .Sh EXIT STATUS
 .Ex -std
@@ -125,15 +141,15 @@ so when that is used the exit status will be of that tool.
 .Sh EXAMPLES
 Assuming a client has uploaded public keys and an admin has been
 notified about this somehow, the system associated with the client can
-be found and then a hostname record added for that client.
+be found and then a hostname record added for that client;
 .Pp
 .Dl $ Ic irulan unhosted
 .Dl ...
 .Dl $ Ic irulan addhost 123 foo.example.edu
 .Pp
-would display what system records have no corresponding hostname
-associated with them, and the second command would associate that
-specific hostname with system id 123. Hosts must manually be added.
+would display what system records have no corresponding hostname, and
+the second command would associate that specific hostname with system id
+123. Hosts must manually be added.
 .Pp
 A script such as
 .Pp

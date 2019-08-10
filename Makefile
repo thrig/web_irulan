@@ -10,11 +10,13 @@ CFLAGS=-std=c99 -O3 -Wall -pedantic -fno-diagnostics-color -fstack-protector-all
 depend:
 	perl -e 'use 5.16.0'
 	cpanm --installdeps .
+	-pkg-config --print-errors --exists libssh2
 
 ssh-hkaudit: ssh-hkaudit.c
 	$(CC) $(CFLAGS) `pkg-config --cflags --libs libssh2` ssh-hkaudit.c -o ssh-hkaudit
 
-test:
+# NOTE ssh-hkaudit is not necessary for testing so could be removed
+test: ssh-hkaudit
 	@prove --lib --nocolor
 
 clean:
