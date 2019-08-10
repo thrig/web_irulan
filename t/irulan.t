@@ -99,16 +99,18 @@ irulan args => "ssh_known_hosts -n $now", status => 2;
 # have all been dealt with
 irulan args => '-n ssh_known_hosts 0', stdout => qr/^localhost $edkey/;
 
+# IP addresses should in theory be canonified by inet_* calls
 my $randport = 1024 + int rand 100;
-irulan args => "-n addhost $sysid 127.0.0.1 $randport";
+irulan args =>
+  "-n addhost $sysid 0000:0000:0000:0000:0000:0000:0000:0001 $randport";
 irulan
   args   => 'list',
-  stdout => qr/^$sysid 127.0.0.1 $randport\n$sysid localhost$/;
+  stdout => qr/^$sysid ::1 $randport\n$sysid localhost$/;
 irulan
   args   => '-n ssh_known_hosts',
-  stdout => qr/^\[127.0.0.1\]:$randport $edkey\nlocalhost $edkey/;
+  stdout => qr/^\[::1\]:$randport $edkey\nlocalhost $edkey/;
 
-irulan args => "rmhost 127.0.0.1 $randport";
+irulan args => "rmhost ::1 $randport";
 
 irulan args => 'list', stdout => qr/^$sysid localhost$/;
 
