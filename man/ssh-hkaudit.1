@@ -1,4 +1,4 @@
-.Dd August  4 2019
+.Dd August 10 2019
 .Dt SSH-HKAUDIT 1
 .nh
 .Os
@@ -16,14 +16,16 @@
 .Ek
 .Sh DESCRIPTION
 .Nm
-connects via SSH to the given
+connects using libssh2 to the given
 .Ar host
 and optional
 .Ar port
-and attempts to verify the SSH known hosts against the
+and verifies the SSH known hosts using the given
 .Ar known-host-file .
-A minimal SSH connection is made; the connection exits before
-authentication.
+The connection is shutdown before authentication. On OpenBSD,
+.Nm
+is only allowed minimal access to the system and even less once the
+socket is established.
 .Pp
 Options:
 .Bl -tag -width Ds
@@ -63,11 +65,17 @@ unknown error from
 check the documentation for changes? Text to standard output.
 .El
 .Sh EXAMPLES
-No news is good news.
+No news is good news, assuming the public keys for the local system
+are in the
+.Pa known_hosts
+file for the user running the command:
 .Pp
 .Dl $ Ic ssh-hkaudit ~/.ssh/known_hosts localhost 22
 .Dl $ Ic echo $?
 .Dl 0
+.Dl $ Ic ./ssh-hkaudit /dev/null localhost \&; echo $?
+.Dl not found
+.Dl 11
 .Pp
 .Nm
 will leave particular logs as it disconnects prior to authentication.
@@ -84,9 +92,13 @@ libssh2 cannot negotiate a connection with:
 .Pp
 .Dl ... Unable to negotiate with ...: no matching MAC found.
 .Pp
-This is due to a OpenSSH 8.0 server offering only:
+This is due to an OpenSSH 8.0 server offering only
 .Pp
 .Dl MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+.Pp
+which is less compatible but does cut done on brute force attempts
+looking for weak passwords. I eventually put that SSH daemon on a
+custom port to cut down on the log spam even more.
 .Sh SEE ALSO
 .Xr irulan 1 ,
 .Xr ssh-keyscan 1
@@ -95,5 +107,6 @@ This is due to a OpenSSH 8.0 server offering only:
 .Sh AUTHOR
 .An Jeremy Mates
 .Sh CAVEATS
-The interface to this tool may change to instead operate on lists of
-hosts and a batch report of the results.
+This tool will not scale well to large number of hosts. Probably a
+different tool should be written or an existing parallel SSH
+implementation used if there are large numbers of hosts to audit.

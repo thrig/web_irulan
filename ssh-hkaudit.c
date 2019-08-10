@@ -1,4 +1,4 @@
-/* ssh-hkaudit - check that the known_hosts for a host are known */
+/* ssh-hkaudit - check that the known_hosts for a host are valid */
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -118,15 +118,20 @@ int main(int argc, char *argv[])
         errx(HKEXIT_ERR, "libssh2_init failed (%d)", ret);
     if ((session = libssh2_session_init()) == NULL)
         errx(HKEXIT_ERR, "libssh2_session_init failed");
-    if ((ret = libssh2_session_handshake(session, sock)) != 0)
-        errx(HKEXIT_ERR, "libssh2_session_handshake failed (%d)", ret);
     if ((known = libssh2_knownhost_init(session)) == NULL)
         errx(HKEXIT_ERR, "libssh2_knownhost_init failed");
-
     if ((ret =
          libssh2_knownhost_readfile(known, known_file,
                                     LIBSSH2_KNOWNHOST_FILE_OPENSSH)) < 0)
         errx(HKEXIT_ERR, "libssh2_knownhost_readfile failed (%d)", ret);
+
+#ifdef __OpenBSD__
+    if (pledge("stdio", NULL) == -1)
+        err(HKEXIT_ERR, "pledge failed");
+#endif
+
+    if ((ret = libssh2_session_handshake(session, sock)) != 0)
+        errx(HKEXIT_ERR, "libssh2_session_handshake failed (%d)", ret);
 
     if ((fingerprint = libssh2_session_hostkey(session, &len, &type)) == NULL)
         errx(HKEXIT_ERR, "libssh2_session_hostkey failed");

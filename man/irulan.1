@@ -16,7 +16,8 @@
 .Sh DESCRIPTION
 .Nm
 interacts with the Irulan database of the Web::Irulan Perl module and
-provides various commands related to the management of ssh host keys. It
+provides various commands related to the management of ssh host keys.
+.Nm
 runs on the same host that the Irulan database is hosted on.
 .Ss Options
 These may appear before or after the
@@ -51,7 +52,7 @@ files.
 A 
 .Ar command
 must be provided. Port 22 is assumed for various commands if not
-provided.
+provided. Only numeric port numbers are allowed.
 .Bl -tag -width Ds
 .It Cm addhost Ar sysid Ar host Op Ar port
 Associates a system ID with a particular hostname. Use the
@@ -77,6 +78,8 @@ that must be set; this command must support three arguments:
 .It
 .Op Ar port
 .El
+.Pp
+This will obviously not scale to large numbers of hosts.
 .It Cm cat Op Ar file|- ..
 Parses public keys from the given files or stdin and associates all the
 keys parsed with a new system.
@@ -121,12 +124,14 @@ to make such an association.
 .Sh ENVIRONMENT
 .Bl -tag -width Ds
 .It Dv IRULAN_AUDIT_CMD
-Command used by the
+Command called by the
 .Cm audit
-mode to check host key entries in the database.
+mode to check host key entries with.
+.Xr ssh-hkaudit 1
+is a minimal implementation of this role.
 .It Dv IRULAN_DB_PATH
-Specifies the path to the Irulan database. This path should agree with
-what the Web::Irulan web application uses, if that is being used.
+Specifies the path to the Irulan database. This path must agree with the
+Web::Irulan web application, if that is being used.
 .El
 .Sh EXIT STATUS
 .Ex -std
