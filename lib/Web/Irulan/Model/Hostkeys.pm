@@ -14,13 +14,13 @@ sub add_host {
 }
 
 sub add_system {
-    my ($self, $uuid, $info, $pubkeys) = @_;
+    my ($self, $uuid, $info, @pubkeys) = @_;
     my $db  = $self->sqlite->db;
     my $now = time();
     my $id =
       $db->insert('systems', { uuid => $uuid, info => $info, mtime => $now })
       ->last_insert_id;
-    for my $key (@$pubkeys) {
+    for my $key (@pubkeys) {
         $db->insert('sshkeys', { sysid => $id, pubkey => $key, mtime => $now });
     }
     return $id;

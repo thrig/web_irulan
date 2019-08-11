@@ -5,7 +5,7 @@
 package Web::Irulan::Controller::Ssh;
 use Mojo::Base 'Mojolicious::Controller';
 
-use Data::SSHPubkey;
+use Data::SSHPubkey 1.00 ();
 
 my $uuid_re =
   qr{[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}};
@@ -35,12 +35,12 @@ sub upload {
         goto RESPONSE;
     }
 
-    my $pubkeys = Data::SSHPubkey::pubkeys(\$input);
+    my @pubkeys = Data::SSHPubkey::pubkeys(\$input);
     # NOTE this strips out the PEM PKCS8 RFC4716 types (which are
     # unlikely to be uploaded by an OpenSSH client)
-    @$pubkeys =
-      map { $_->[0] =~ m/^(ecdsa|ed25519|rsa)$/ ? $_->[1] : () } @$pubkeys;
-    if (!@$pubkeys) {
+    @pubkeys =
+      map { $_->[0] =~ m/^(ecdsa|ed25519|rsa)$/ ? $_->[1] : () } @pubkeys;
+    if (!@pubkeys) {
         $logger->warn("failed to parse keys from remote=$remote uuid=$uuid");
         $resp->{error} = 'no keys found';
         $status = 406;
@@ -50,7 +50,7 @@ sub upload {
     # IP address of client given as info to help relate random UUID to a
     # host (which NAT or SLAAC can confound)
     my $sysid;
-    eval { $sysid = $self->hostkeys->add_system($uuid, $remote, $pubkeys) };
+    eval { $sysid = $self->hostkeys->add_system($uuid, $remote, @pubkeys) };
     if ($@) {
         # mostly likely cause would be a client reusing a previous UUID
         # for new keys; clients must instead use a new UUID. or it could
@@ -61,8 +61,8 @@ sub upload {
         goto RESPONSE;
     }
 
-    $logger->warn("new hostkeys remote=$remote sysid=$sysid uuid=$uuid count="
-          . scalar @$pubkeys);
+    $logger->warn(
+        "new hostkeys remote=$remote sysid=$sysid uuid=$uuid count=" . scalar @pubkeys);
     $resp->{id} = $sysid;
 
   RESPONSE:

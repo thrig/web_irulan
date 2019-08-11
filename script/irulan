@@ -72,8 +72,7 @@ my %commands = (
             @pubkeys{ map { $_->[1] } read_from_fh() } = ();
         }
         die "irulan: no pubkeys parsed\n" unless %pubkeys;
-        $db->add_system(Data::UUID->new->create_str, 'cat ' . time(),
-            [ keys %pubkeys ]);
+        $db->add_system(Data::UUID->new->create_str, 'cat ' . time(), keys %pubkeys);
     },
     keyscan => sub {
         my ($host, $port) = hostport(@ARGV);
@@ -86,7 +85,7 @@ my %commands = (
         $db->add_system(
             Data::UUID->new->create_str,
             ($port == 22 ? $host : "$host $port"),
-            [ map { $_->[1] } @pubkeys ]
+            map { $_->[1] } @pubkeys
         );
     },
     list => sub {
@@ -249,12 +248,11 @@ sub ip_addrs {
 
 sub read_from_fh {
     my ($fh) = @_;
-    @{  Data::SSHPubkey::pubkeys(
-            \do {
-                local $/;
-                if (defined $fh) { binmode $fh; readline $fh }
-                else             { readline }
-            }
-        )
-    };
+    Data::SSHPubkey::pubkeys(
+        \do {
+            local $/;
+            if (defined $fh) { binmode $fh; readline $fh }
+            else             { readline }
+        }
+    );
 }

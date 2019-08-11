@@ -1,5 +1,5 @@
 requires 'App::Prove';
-requires 'Data::SSHPubkey';
+requires 'Data::SSHPubkey', '>= 1.00';
 requires 'Data::UUID';
 requires 'File::Spec';
 requires 'File::Temp';

@@ -92,7 +92,9 @@ TODO
    everyone can see those, while internal hosts can get the full list?
  * Mojo::SQLite is nice but makes irulan(1) slow to start up ...
  * ssh-hkaudit - change to support connecting to a list of hosts and key
-   files instead of one host per invocation
+   files instead of one host per invocation. or have a different
+   mass-audit that can scale better, though that would probably be best
+   done by some existing parallel SSH tool
 
 
 History

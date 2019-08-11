@@ -8,8 +8,8 @@ use Mojo::Base -strict;
 use Data::UUID;
 use File::Spec::Functions qw(catfile);
 use File::Temp qw(tempdir);
-use Test::More;
 use Test::Mojo;
+use Test::More;
 
 BEGIN {
     my $dir = tempdir("irulan.XXXXXXXXXX", CLEANUP => 1, TMPDIR => 1);
