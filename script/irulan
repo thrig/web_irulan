@@ -11,9 +11,9 @@ BEGIN {
     $ENV{$_} = 1 for qw(MOJO_NO_NNR MOJO_NO_SOCKS MOJO_NO_TLS);
     unshift @INC, "$FindBin::Bin/../lib";
 }
-use Data::SSHPubkey ();
-use Data::UUID      ();
-use File::Temp      ();
+use Data::SSHPubkey 1.00 ();
+use Data::UUID ();
+use File::Temp ();
 use Getopt::Long qw(GetOptions);
 use Mojo::SQLite ();
 use Scalar::Util qw(looks_like_number);

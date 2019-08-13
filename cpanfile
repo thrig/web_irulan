@@ -8,7 +8,6 @@ requires 'Getopt::Long';
 requires 'Mojo::SQLite';
 requires 'Scalar::Util';
 requires 'Socket';
-requires 'Test::Cmd';
 requires 'Test::More', '>= 0.88';
-requires 'Test::UnixExit';
+requires 'Test::UnixCmdWrap';
 requires 'Text::ParseWords';
