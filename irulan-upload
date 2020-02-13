@@ -1,6 +1,10 @@
 #!/bin/sh
 # irulan-upload - uploads SSH host keys to the Irulan. tested only on
 # Centos7 clients. requires uuidgen and curl
+# 
+# another option may be to pull a UUID from
+# /sys/class/dmi/id/product_uuid (on linux) or similar instead of
+# inventing a new one here
 umask 027
 [ ! -d /etc/irulan ] && mkdir /etc/irulan
 [ ! -d /etc/irulan ] && exit 1
